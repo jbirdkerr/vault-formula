@@ -112,7 +112,7 @@ def auth_backend_enabled(name, backend_type, description='', mount_point=None):
             ret['result'] = True
             ret['changes']['new'] = __salt__[
                 'vault.list_auth_backends']()
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             ret['result'] = False
             log.exception(e)
         ret['comment'] = ('The {backend} has been successfully mounted at '
@@ -155,7 +155,7 @@ def audit_backend_enabled(name, backend_type, description='', options=None,
             ret['comment'] = ('The {backend} audit backend has been '
                               'successfully enabled.'.format(
                                   backend=backend_type))
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             ret['result'] = False
             log.exception(e)
     return ret
@@ -216,7 +216,7 @@ def secret_backend_enabled(name, backend_type, description='', mount_point=None,
             ret['result'] = True
             ret['changes']['new'] = __salt__[
                 'vault.list_secret_backends']()
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             ret['result'] = False
             log.exception(e)
         if connection_config:
@@ -226,7 +226,7 @@ def secret_backend_enabled(name, backend_type, description='', mount_point=None,
             try:
                 __salt__['vault.write'](connection_config_path,
                                         **connection_config)
-            except hvac.exceptions.VaultError as e:
+            except __utils__['vault.vault_error']() as e:
                 ret['comment'] += ('The backend was enabled but the connection '
                                   'could not be configured\n')
                 log.exception(e)
@@ -248,7 +248,7 @@ def secret_backend_enabled(name, backend_type, description='', mount_point=None,
                 __salt__['vault.write'](ttl_config_path,
                                         default_lease_ttl=ttl_default,
                                         max_lease_ttl=ttl_max)
-            except hvac.exceptions.VaultError as e:
+            except __utils__['vault.vault_error']() as e:
                 ret['comment'] += ('The backend was enabled but the connection '
                                   'ttl could not be tuned\n'.format(e))
                 log.exception(e)
@@ -270,7 +270,7 @@ def secret_backend_enabled(name, backend_type, description='', mount_point=None,
                 __salt__['vault.write'](lease_config_path,
                                         ttl=lease_default,
                                         max_ttl=lease_max)
-            except hvac.exceptions.VaultError as e:
+            except __utils__['vault.vault_error']() as e:
                 ret['comment'] += ('The backend was enabled but the lease '
                                   'length could not be configured\n'.format(e))
                 log.exception(e)
@@ -316,7 +316,7 @@ def app_id_created(name, app_id, policies, display_name=None,
                 'old': current_id,
                 'new': __salt__['vault.get_app_id'](app_id, mount_point)
             }
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             log.exception(e)
             ret['result'] = False
             ret['comment'] = ('Encountered an error while attempting to '
@@ -358,7 +358,7 @@ def policy_present(name, rules):
                               'created/updated.'.format(policy_name=name))
             ret['changes']['old'] = current_policy
             ret['changes']['new'] = rules
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             log.exception(e)
             ret['comment'] = ('The {policy_name} policy failed to be '
                               'created/updated'.format(policy_name=name))
@@ -397,7 +397,7 @@ def policy_absent(name):
                               'deleted.')
             ret['changes']['old'] = current_policy
             ret['changes']['new'] = {}
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             log.exception(e)
             ret['comment'] = ('The {policy_name} policy failed to be '
                               'created/updated'.format(policy_name=name))
@@ -445,7 +445,7 @@ def role_present(name, mount_point, options, override=False):
                               'created.'.format(role=name))
             ret['changes']['old'] = current_role
             ret['changes']['new'] = response
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             log.exception(e)
             ret['comment'] = ('The {role} role failed to be '
                               'created'.format(role=name))
@@ -480,16 +480,26 @@ def role_absent(name, mount_point):
         __salt__['vault.delete']('{mount}/roles/{name}'.format(
             mount=mount_point, name=name))
         ret['result'] = True
-    except hvac.exceptions.VaultError as e:
+    except __utils__['vault.vault_error']() as e:
         log.exception(e)
         raise salt.exceptions.SaltInvocationError(e)
     return ret
 
-def ec2_role_created(name, role, bound_ami_id=None, bound_iam_role_arn=None,
-                     bound_account_id=None, bound_iam_instance_profile_arn=None,
-                     role_tag=None, ttl=None, max_ttl=None, policies=None,
+def ec2_role_created(name,
+                     role,
+                     bound_ami_id=None,
+                     bound_iam_role_arn=None,
+                     bound_account_id=None,
+                     bound_iam_instance_profile_arn=None,
+                     role_tag=None,
+                     ttl=None,
+                     max_ttl=None,
+                     policies=None,
                      allow_instance_migration=False,
-                     disallow_reauthentication=False):
+                     disallow_reauthentication=False,
+                     period="",
+                     update_role=False,
+                     **kwargs):
     """
     Ensure that the specified EC2 role exists so that it can be used for
     authenticating with the Vault EC2 backend.
@@ -515,41 +525,53 @@ def ec2_role_created(name, role, bound_ami_id=None, bound_iam_role_arn=None,
     """
     try:
         current_role = __salt__['vault.get_ec2_role'](role)
-    except (hvac.exceptions.InvalidRequest, hvac.exceptions.InvalidPath):
+    except __utils__['vault.vault_error']():
         current_role = None
+
+    role_params = dict(
+        role=role,
+        bound_ami_id=bound_ami_id,
+        role_tag=role_tag,
+        bound_iam_role_arn=bound_iam_role_arn,
+        bound_account_id=bound_account_id,
+        bound_iam_instance_profile_arn=bound_iam_instance_profile_arn,
+        ttl=ttl, max_ttl=max_ttl,
+        policies=','.join(policies),
+        allow_instance_migration=allow_instance_migration,
+        disallow_reauthentication=disallow_reauthentication,
+        period=period,
+        **kwargs
+    )
+
+    current_params = (current_role or {}).get('data', {})
+
     ret = {'name': name,
            'comment': '',
            'result': False,
            'changes': {}}
-    if current_role and current_role.get('data', {}).get('policies') == (
-            policies or ['default']):
+
+    if current_role and not update_role:
         ret['result'] = True
         ret['comment'] = 'The {0} role already exists'.format(role)
     elif __opts__['test']:
         ret['result'] = None
         if current_role:
             ret['comment'] = ('The {0} role will be updated with the given '
-                              'policies'.format(role))
-            ret['changes']['old'] = current_role
+                              'parameters').format(role)
+            ret['changes']['old'] = current_params
+            ret['changes']['new'] = role_params
         else:
             ret['comment'] = ('The {0} role will be created')
     else:
         try:
             __salt__['vault.create_vault_ec2_client_configuration']()
-            __salt__['vault.create_ec2_role'](role, bound_ami_id,
-                                              role_tag=role_tag,
-                                              bound_iam_role_arn=bound_iam_role_arn,
-                                              bound_account_id=bound_account_id,
-                                              bound_iam_instance_profile_arn=bound_iam_instance_profile_arn,
-                                              ttl=ttl, max_ttl=max_ttl,
-                                              policies=','.join(policies),
-                                              allow_instance_migration=allow_instance_migration,
-                                              disallow_reauthentication=disallow_reauthentication)
+            __salt__['vault.create_ec2_role'](
+                **{k: str(v) for k, v in role_params.items() if not v is None})
             ret['result'] = True
             ret['comment'] = 'Successfully created the {0} role.'.format(role)
             ret['changes']['new'] = __salt__['vault.get_ec2_role'](role)
             ret['changes']['old'] = current_role or {}
-        except hvac.exceptions.VaultError as e:
+        except __utils__['vault.vault_error']() as e:
             log.exception(e)
             ret['result'] = False
             ret['comment'] = 'Failed to create the {0} role.'.format(role)
@@ -614,11 +636,17 @@ def ec2_minion_authenticated(name, role, pkcs7=None, nonce=None,
                 nonce = __salt__['config.get']('vault.nonce')
             auth_result = __salt__['vault.auth_ec2'](pkcs7=pkcs7, role=role,
                                                      nonce=nonce)
+            log.debug('Auth response attributes: {}'.format(
+                auth_result['auth'].keys()))
             client_config = {
-                'vault.token': auth_result['auth']['client_token'],
-                'vault.nonce': auth_result['auth']['metadata'].get('nonce',
-                                                                   nonce)
+                'vault.{0}'.format(k): v for k, v in auth_result['auth'].items()
             }
+
+            client_config['vault.token'] = client_config.pop('vault.client_token')
+
+            if nonce:
+                client_config['vault.nonce'] = nonce
+
             vault_conf_files = []
             if not client_conf_files:
                 vault_conf_files.append(os.path.join(
